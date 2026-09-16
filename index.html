@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>糸通し</title>
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#14171a">
+<link rel="icon" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="糸通し">
+
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    background: #14171a;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  canvas {
+    display: block;
+    width: 100vw;
+    height: 100vh;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<script>
+(function () {
+  "use strict";
+
+  /* ==========================================================================
+   * 物理・難易度 調整用パラメータ
+   * ここの数値だけを触れば挙動を調整できます。
+   * ========================================================================== */
+
+  // 下降時にかかる重力加速度 (px/s^2)。大きいほど落下が速くキビキビした感じに、
+  // 小さいほどフワッと漂うような沈み方になる。
+  const GRAVITY = 1300;
+
+  // 長押し中にかかる上昇加速度 (px/s^2)。GRAVITYより少し強めにすると
+  // 「じわっと浮き上がる」感触になる。
+  const LIFT = 1500;
+
+  // 上昇方向の最高速度 (px/s)。これ以上は長押ししても加速しない。
+  const MAX_UP_SPEED = 230;
+
+  // 下降方向の最高速度 (px/s)。落下の終端速度。
+  const MAX_DOWN_SPEED = 340;
+
+  // 針穴（障害物）が流れてくる基本スクロール速度 (px/s)。
+  const BASE_SCROLL_SPEED = 150;
+
+  // 通過数(スコア)が1増えるごとに加算されるスクロール速度 (px/s)。
+  const SPEED_INCREASE_PER_SCORE = 3.5;
+
+  // スクロール速度の上限 (px/s)。無限に速くなりすぎないようにする。
+  const MAX_SCROLL_SPEED = 340;
+
+  // 針穴の隙間の初期サイズ (px)。
+  const GAP_BASE = 190;
+
+  // 針穴の隙間の最小サイズ (px)。これ以上は狭くならない。
+  const GAP_MIN = 110;
+
+  // スコアが1増えるごとに隙間が狭くなる量 (px)。
+  const GAP_DECREASE_PER_SCORE = 2.2;
+
+  // 針穴と針穴の間隔 (px、距離ベース)。
+  const OBSTACLE_SPACING = 300;
+
+  // 障害物（壁）の横幅 (px)。
+  const OBSTACLE_WIDTH = 56;
+
+  // 糸の当たり判定半径 (px)。
+  const PLAYER_RADIUS = 9;
+
+  // 糸のしっぽ（軌跡）の残像数。
+  const TAIL_LENGTH = 16;
+
+  // しっぽの点と点の間隔 (px)。
+  const TAIL_SPACING = 7;
+
+  // しっぽをサンプリングする間隔 (秒)。小さいほど滑らかな軌跡になる。
+  const TAIL_SAMPLE_INTERVAL = 0.02;
+
+  /* ========================================================================== */
+
+  const COLOR_BG = "#14171a";
+  const COLOR_FG = "#f5f5f2";
+  const COLOR_OBSTACLE = "rgba(245, 245, 242, 0.82)";
+  const COLOR_DIM = "rgba(245, 245, 242, 0.45)";
+
+  const canvas = document.getElementById("game");
+  const ctx = canvas.getContext("2d");
+
+  let width = 0;
+  let height = 0;
+  let dpr = 1;
+
+  function resize() {
+    dpr = window.devicePixelRatio || 1;
+    width = window.innerWidth;
+    height = window.innerHeight;
+    canvas.width = Math.floor(width * dpr);
+    canvas.height = Math.floor(height * dpr);
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    playerX = Math.max(70, Math.min(140, width * 0.26));
+  }
+
+  // ---- ゲーム状態 ----
+  // "title" | "playing" | "gameover"
+  let state = "title";
+
+  let playerX = 100;
+  let playerY = 0;
+  let playerVY = 0;
+
+  let tail = [];
+  let tailTimer = 0;
+
+  let obstacles = [];
+  let spawnDistance = 0;
+
+  let score = 0;
+  let best = 0;
+  try {
+    best = parseInt(localStorage.getItem("itodoshi_best") || "0", 10) || 0;
+  } catch (e) {
+    best = 0;
+  }
+
+  let scrollSpeed = BASE_SCROLL_SPEED;
+  let currentGap = GAP_BASE;
+
+  let holding = false;
+
+  function resetGame() {
+    playerY = height / 2;
+    playerVY = 0;
+    tail = [];
+    tailTimer = 0;
+    obstacles = [];
+    spawnDistance = OBSTACLE_SPACING * 0.55;
+    score = 0;
+    scrollSpeed = BASE_SCROLL_SPEED;
+    currentGap = GAP_BASE;
+    state = "playing";
+  }
+
+  function spawnObstacle() {
+    const margin = 36;
+    const maxTop = Math.max(margin, height - margin - currentGap);
+    const gapTop = margin + Math.random() * Math.max(1, maxTop - margin);
+    obstacles.push({
+      x: width + OBSTACLE_WIDTH,
+      gapTop: gapTop,
+      gapHeight: currentGap,
+      passed: false
+    });
+  }
+
+  function triggerGameOver() {
+    if (state !== "playing") return;
+    state = "gameover";
+    if (score > best) {
+      best = score;
+      try {
+        localStorage.setItem("itodoshi_best", String(best));
+      } catch (e) {
+        /* no-op */
+      }
+    }
+  }
+
+  function onPressStart() {
+    if (state === "title") {
+      resetGame();
+    } else if (state === "gameover") {
+      resetGame();
+    }
+  }
+
+  // ---- 入力 ----
+  function setHolding(v) {
+    holding = v;
+  }
+
+  window.addEventListener(
+    "keydown",
+    function (e) {
+      if (e.code === "Space" || e.key === " ") {
+        e.preventDefault();
+        if (!holding) {
+          holding = true;
+          onPressStart();
+        }
+      }
+    },
+    { passive: false }
+  );
+
+  window.addEventListener("keyup", function (e) {
+    if (e.code === "Space" || e.key === " ") {
+      holding = false;
+    }
+  });
+
+  canvas.addEventListener(
+    "touchstart",
+    function (e) {
+      e.preventDefault();
+      if (!holding) {
+        holding = true;
+        onPressStart();
+      }
+    },
+    { passive: false }
+  );
+
+  canvas.addEventListener(
+    "touchend",
+    function (e) {
+      e.preventDefault();
+      holding = false;
+    },
+    { passive: false }
+  );
+
+  canvas.addEventListener(
+    "touchcancel",
+    function (e) {
+      holding = false;
+    },
+    { passive: false }
+  );
+
+  // デスクトップでの動作確認用にマウスにも対応
+  canvas.addEventListener("mousedown", function () {
+    if (!holding) {
+      holding = true;
+      onPressStart();
+    }
+  });
+  window.addEventListener("mouseup", function () {
+    holding = false;
+  });
+
+  window.addEventListener("resize", resize);
+
+  // ---- 更新 ----
+  function update(dt) {
+    if (state !== "playing") return;
+
+    const accel = holding ? -LIFT : GRAVITY;
+    playerVY += accel * dt;
+    playerVY = Math.max(-MAX_UP_SPEED, Math.min(MAX_DOWN_SPEED, playerVY));
+    playerY += playerVY * dt;
+
+    tailTimer += dt;
+    if (tailTimer >= TAIL_SAMPLE_INTERVAL) {
+      tailTimer = 0;
+      tail.unshift(playerY);
+      if (tail.length > TAIL_LENGTH) tail.pop();
+    }
+
+    scrollSpeed = Math.min(
+      MAX_SCROLL_SPEED,
+      BASE_SCROLL_SPEED + score * SPEED_INCREASE_PER_SCORE
+    );
+    currentGap = Math.max(
+      GAP_MIN,
+      GAP_BASE - score * GAP_DECREASE_PER_SCORE
+    );
+
+    spawnDistance += scrollSpeed * dt;
+    if (spawnDistance >= OBSTACLE_SPACING) {
+      spawnDistance -= OBSTACLE_SPACING;
+      spawnObstacle();
+    }
+
+    for (let i = 0; i < obstacles.length; i++) {
+      obstacles[i].x -= scrollSpeed * dt;
+    }
+    obstacles = obstacles.filter(function (ob) {
+      return ob.x + OBSTACLE_WIDTH > -10;
+    });
+
+    for (let i = 0; i < obstacles.length; i++) {
+      const ob = obstacles[i];
+
+      if (!ob.passed && ob.x + OBSTACLE_WIDTH < playerX) {
+        ob.passed = true;
+        score++;
+      }
+
+      const overlapX =
+        playerX + PLAYER_RADIUS > ob.x &&
+        playerX - PLAYER_RADIUS < ob.x + OBSTACLE_WIDTH;
+
+      if (overlapX) {
+        if (
+          playerY - PLAYER_RADIUS < ob.gapTop ||
+          playerY + PLAYER_RADIUS > ob.gapTop + ob.gapHeight
+        ) {
+          triggerGameOver();
+        }
+      }
+    }
+
+    if (playerY - PLAYER_RADIUS < 0 || playerY + PLAYER_RADIUS > height) {
+      playerY = Math.max(
+        PLAYER_RADIUS,
+        Math.min(height - PLAYER_RADIUS, playerY)
+      );
+      triggerGameOver();
+    }
+  }
+
+  // ---- 描画 ----
+  function drawBoundaries() {
+    ctx.strokeStyle = COLOR_DIM;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, 1);
+    ctx.lineTo(width, 1);
+    ctx.moveTo(0, height - 1);
+    ctx.lineTo(width, height - 1);
+    ctx.stroke();
+  }
+
+  function drawObstacles() {
+    ctx.fillStyle = COLOR_OBSTACLE;
+    for (let i = 0; i < obstacles.length; i++) {
+      const ob = obstacles[i];
+      ctx.fillRect(ob.x, 0, OBSTACLE_WIDTH, ob.gapTop);
+      ctx.fillRect(
+        ob.x,
+        ob.gapTop + ob.gapHeight,
+        OBSTACLE_WIDTH,
+        height - (ob.gapTop + ob.gapHeight)
+      );
+    }
+  }
+
+  function drawTail() {
+    if (tail.length < 2) return;
+    for (let i = 0; i < tail.length - 1; i++) {
+      const t = i / tail.length;
+      const alpha = (1 - t) * 0.5;
+      ctx.strokeStyle = "rgba(245, 245, 242, " + alpha.toFixed(3) + ")";
+      ctx.lineWidth = Math.max(1, 3.5 * (1 - t));
+      ctx.beginPath();
+      ctx.moveTo(playerX - i * TAIL_SPACING, tail[i]);
+      ctx.lineTo(playerX - (i + 1) * TAIL_SPACING, tail[i + 1]);
+      ctx.stroke();
+    }
+  }
+
+  function drawPlayer() {
+    ctx.strokeStyle = COLOR_FG;
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(playerX, playerY - PLAYER_RADIUS);
+    ctx.lineTo(playerX, playerY + PLAYER_RADIUS);
+    ctx.stroke();
+  }
+
+  function drawScore() {
+    ctx.fillStyle = COLOR_FG;
+    ctx.font = "28px monospace";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.fillText(String(score), width / 2, 22);
+  }
+
+  function drawTitle() {
+    ctx.fillStyle = COLOR_FG;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    ctx.font = "bold 40px monospace";
+    ctx.fillText("糸 通 し", width / 2, height / 2 - 60);
+
+    ctx.font = "16px monospace";
+    ctx.fillStyle = COLOR_DIM;
+    ctx.fillText("長押しで上昇 / 離すと下降", width / 2, height / 2 + 4);
+
+    ctx.fillStyle = COLOR_FG;
+    ctx.font = "18px monospace";
+    const blink = Math.floor(performance.now() / 500) % 2 === 0;
+    if (blink) {
+      ctx.fillText("SPACE または タップで START", width / 2, height / 2 + 46);
+    }
+
+    if (best > 0) {
+      ctx.fillStyle = COLOR_DIM;
+      ctx.font = "14px monospace";
+      ctx.fillText("BEST " + best, width / 2, height / 2 + 86);
+    }
+  }
+
+  function drawGameOver() {
+    ctx.fillStyle = "rgba(20, 23, 26, 0.55)";
+    ctx.fillRect(0, 0, width, height);
+
+    ctx.fillStyle = COLOR_FG;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+
+    ctx.font = "bold 30px monospace";
+    ctx.fillText("GAME OVER", width / 2, height / 2 - 50);
+
+    ctx.font = "20px monospace";
+    ctx.fillText("SCORE " + score, width / 2, height / 2 - 8);
+
+    ctx.fillStyle = COLOR_DIM;
+    ctx.font = "16px monospace";
+    ctx.fillText("BEST " + best, width / 2, height / 2 + 22);
+
+    ctx.fillStyle = COLOR_FG;
+    ctx.font = "16px monospace";
+    const blink = Math.floor(performance.now() / 500) % 2 === 0;
+    if (blink) {
+      ctx.fillText("SPACE または タップで RETRY", width / 2, height / 2 + 62);
+    }
+  }
+
+  function render() {
+    ctx.fillStyle = COLOR_BG;
+    ctx.fillRect(0, 0, width, height);
+
+    if (state === "title") {
+      drawBoundaries();
+      drawTitle();
+      return;
+    }
+
+    drawBoundaries();
+    drawObstacles();
+    drawTail();
+    drawPlayer();
+    drawScore();
+
+    if (state === "gameover") {
+      drawGameOver();
+    }
+  }
+
+  // ---- メインループ ----
+  let lastTime = null;
+  function frame(ts) {
+    if (lastTime === null) lastTime = ts;
+    let dt = (ts - lastTime) / 1000;
+    lastTime = ts;
+    if (dt > 0.033) dt = 0.033;
+
+    update(dt);
+    render();
+
+    requestAnimationFrame(frame);
+  }
+
+  resize();
+  playerY = height / 2;
+  requestAnimationFrame(frame);
+})();
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", function () {
+    navigator.serviceWorker.register("sw.js").catch(function () {
+      /* PWA登録に失敗してもゲーム自体は通常どおり遊べる */
+    });
+  });
+}
+</script>
+</body>
+</html>

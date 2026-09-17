@@ -15,27 +15,111 @@
 <meta name="apple-mobile-web-app-title" content="糸通し">
 
 <style>
+  :root {
+    --bg: #14171a;
+    --fg: #f5f5f2;
+    --dim: rgba(245, 245, 242, 0.45);
+    --accent: #e8b84b;
+    --panel-bg: #1d2124;
+    --panel-border: rgba(245, 245, 242, 0.25);
+  }
+  * { box-sizing: border-box; }
   html, body {
     margin: 0;
     padding: 0;
     width: 100%;
     height: 100%;
     overflow: hidden;
-    background: #14171a;
+    background: var(--bg);
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
   }
+  body {
+    font-family: "MS Gothic", "Courier New", monospace;
+  }
   canvas {
     display: block;
     width: 100vw;
     height: 100vh;
+    background: var(--bg);
   }
+  .overlay {
+    position: fixed;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(10, 12, 13, 0.75);
+    padding: 16px;
+    z-index: 10;
+  }
+  .overlay[hidden] { display: none !important; }
+  .panel {
+    background: var(--panel-bg);
+    border: 1px solid var(--panel-border);
+    border-radius: 4px;
+    padding: 24px 20px;
+    width: min(320px, 100%);
+    text-align: center;
+    color: var(--fg);
+  }
+  .panel-title {
+    font-size: 15px;
+    font-weight: bold;
+    letter-spacing: 2px;
+    color: var(--accent);
+    margin: 0 0 10px;
+  }
+  .panel-score {
+    font-size: 14px;
+    color: var(--dim);
+    margin: 0 0 16px;
+  }
+  #nameInput {
+    width: 100%;
+    background: #0f1113;
+    border: 1px solid var(--panel-border);
+    color: var(--fg);
+    font-family: inherit;
+    font-size: 16px;
+    padding: 10px;
+    text-align: center;
+    letter-spacing: 2px;
+    border-radius: 2px;
+  }
+  #nameInput:focus { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .panel-actions { display: flex; gap: 10px; margin-top: 16px; }
+  .panel-actions button {
+    flex: 1;
+    font-family: inherit;
+    font-size: 13px;
+    padding: 10px 0;
+    border-radius: 2px;
+    border: 1px solid var(--panel-border);
+    background: transparent;
+    color: var(--fg);
+  }
+  #submitNameBtn { background: var(--accent); border-color: var(--accent); color: #14171a; font-weight: bold; }
+  .panel-actions button:active { opacity: 0.8; }
 </style>
 </head>
 <body>
 <canvas id="game"></canvas>
+
+<div id="nameEntry" class="overlay" hidden>
+  <div class="panel">
+    <p class="panel-title">TOP5 ランクイン！</p>
+    <p class="panel-score">SCORE <span id="entryScore">0</span></p>
+    <input id="nameInput" type="text" maxlength="10" placeholder="なまえ（10文字まで）" autocomplete="off" />
+    <div class="panel-actions">
+      <button id="submitNameBtn" type="button">登録する</button>
+      <button id="skipNameBtn" type="button">スキップ</button>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -43,68 +127,31 @@
   /* ==========================================================================
    * 物理・難易度 調整用パラメータ
    * 難易度(Easy/Normal/Hard)ごとにプリセットをまとめてあります。
-   * NORMALの数値は元のバランスから変更していません。
    * ========================================================================== */
   const DIFFICULTIES = {
     easy: {
       label: "EASY",
-      GRAVITY: 900,                 // 下降時の重力加速度 (px/s^2)
-      LIFT: 1100,                   // 長押し中の上昇加速度 (px/s^2)
-      MAX_UP_SPEED: 190,            // 上昇方向の最高速度 (px/s)
-      MAX_DOWN_SPEED: 260,          // 下降方向の最高速度 (px/s)
-      BASE_SCROLL_SPEED: 100,       // 基本スクロール速度 (px/s)
-      SPEED_INCREASE_PER_SCORE: 1.5,// スコア+1ごとのスクロール速度上昇量
-      MAX_SCROLL_SPEED: 220,        // スクロール速度の上限 (px/s)
-      GAP_BASE: 230,                // 針穴の隙間の初期サイズ (px)
-      GAP_MIN: 160,                 // 針穴の隙間の最小サイズ (px)
-      GAP_DECREASE_PER_SCORE: 1.0,  // スコア+1ごとの隙間縮小量 (px)
-      OBSTACLE_SPACING: 320         // 針穴同士の間隔 (px)
+      GRAVITY: 900, LIFT: 1100, MAX_UP_SPEED: 190, MAX_DOWN_SPEED: 260,
+      BASE_SCROLL_SPEED: 100, SPEED_INCREASE_PER_SCORE: 1.5, MAX_SCROLL_SPEED: 220,
+      GAP_BASE: 230, GAP_MIN: 160, GAP_DECREASE_PER_SCORE: 1.0, OBSTACLE_SPACING: 320
     },
     normal: {
       label: "NORMAL",
-      // 下降時にかかる重力加速度 (px/s^2)。大きいほど落下が速くキビキビした感じに、
-      // 小さいほどフワッと漂うような沈み方になる。
-      GRAVITY: 1300,
-      // 長押し中にかかる上昇加速度 (px/s^2)。GRAVITYより少し強めにすると
-      // 「じわっと浮き上がる」感触になる。
-      LIFT: 1500,
-      // 上昇方向の最高速度 (px/s)。これ以上は長押ししても加速しない。
-      MAX_UP_SPEED: 230,
-      // 下降方向の最高速度 (px/s)。落下の終端速度。
-      MAX_DOWN_SPEED: 340,
-      // 針穴（障害物）が流れてくる基本スクロール速度 (px/s)。
-      BASE_SCROLL_SPEED: 150,
-      // 通過数(スコア)が1増えるごとに加算されるスクロール速度 (px/s)。
-      SPEED_INCREASE_PER_SCORE: 3.5,
-      // スクロール速度の上限 (px/s)。無限に速くなりすぎないようにする。
-      MAX_SCROLL_SPEED: 340,
-      // 針穴の隙間の初期サイズ (px)。
-      GAP_BASE: 190,
-      // 針穴の隙間の最小サイズ (px)。これ以上は狭くならない。
-      GAP_MIN: 110,
-      // スコアが1増えるごとに隙間が狭くなる量 (px)。
-      GAP_DECREASE_PER_SCORE: 2.2,
-      // 針穴と針穴の間隔 (px、距離ベース)。
-      OBSTACLE_SPACING: 300
+      GRAVITY: 1300, LIFT: 1500, MAX_UP_SPEED: 230, MAX_DOWN_SPEED: 340,
+      BASE_SCROLL_SPEED: 150, SPEED_INCREASE_PER_SCORE: 3.5, MAX_SCROLL_SPEED: 340,
+      GAP_BASE: 190, GAP_MIN: 110, GAP_DECREASE_PER_SCORE: 2.2, OBSTACLE_SPACING: 300
     },
     hard: {
       label: "HARD",
-      GRAVITY: 1500,                 // 下降時の重力加速度 (px/s^2)
-      LIFT: 1650,                    // 長押し中の上昇加速度 (px/s^2)
-      MAX_UP_SPEED: 250,             // 上昇方向の最高速度 (px/s)
-      MAX_DOWN_SPEED: 380,           // 下降方向の最高速度 (px/s)
-      BASE_SCROLL_SPEED: 190,        // 基本スクロール速度 (px/s)
-      SPEED_INCREASE_PER_SCORE: 4.5, // スコア+1ごとのスクロール速度上昇量
-      MAX_SCROLL_SPEED: 400,         // スクロール速度の上限 (px/s)
-      GAP_BASE: 165,                 // 針穴の隙間の初期サイズ (px)
-      GAP_MIN: 95,                   // 針穴の隙間の最小サイズ (px)
-      GAP_DECREASE_PER_SCORE: 2.6,   // スコア+1ごとの隙間縮小量 (px)
-      OBSTACLE_SPACING: 285          // 針穴同士の間隔 (px)
+      GRAVITY: 1500, LIFT: 1650, MAX_UP_SPEED: 250, MAX_DOWN_SPEED: 380,
+      BASE_SCROLL_SPEED: 190, SPEED_INCREASE_PER_SCORE: 4.5, MAX_SCROLL_SPEED: 400,
+      GAP_BASE: 165, GAP_MIN: 95, GAP_DECREASE_PER_SCORE: 2.6, OBSTACLE_SPACING: 285
     }
   };
   const DIFFICULTY_ORDER = ["easy", "normal", "hard"];
 
   let selectedDifficulty = "normal";
+  let runDifficulty = "normal";
   let GRAVITY, LIFT, MAX_UP_SPEED, MAX_DOWN_SPEED, BASE_SCROLL_SPEED;
   let SPEED_INCREASE_PER_SCORE, MAX_SCROLL_SPEED;
   let GAP_BASE, GAP_MIN, GAP_DECREASE_PER_SCORE, OBSTACLE_SPACING;
@@ -127,36 +174,23 @@
 
   function cycleDifficulty(dir) {
     const idx = DIFFICULTY_ORDER.indexOf(selectedDifficulty);
-    const next =
-      DIFFICULTY_ORDER[
-        (idx + dir + DIFFICULTY_ORDER.length) % DIFFICULTY_ORDER.length
-      ];
+    const next = DIFFICULTY_ORDER[(idx + dir + DIFFICULTY_ORDER.length) % DIFFICULTY_ORDER.length];
     applyDifficulty(next);
   }
 
   applyDifficulty(selectedDifficulty);
 
-  // 障害物（壁）の横幅 (px)。
   const OBSTACLE_WIDTH = 56;
-
-  // 糸の当たり判定半径 (px)。
   const PLAYER_RADIUS = 9;
-
-  // 糸のしっぽ（軌跡）の残像数。
   const TAIL_LENGTH = 16;
-
-  // しっぽの点と点の間隔 (px)。
   const TAIL_SPACING = 7;
-
-  // しっぽをサンプリングする間隔 (秒)。小さいほど滑らかな軌跡になる。
   const TAIL_SAMPLE_INTERVAL = 0.02;
-
-  /* ========================================================================== */
 
   const COLOR_BG = "#14171a";
   const COLOR_FG = "#f5f5f2";
   const COLOR_OBSTACLE = "rgba(245, 245, 242, 0.82)";
   const COLOR_DIM = "rgba(245, 245, 242, 0.45)";
+  const COLOR_ACCENT = "#e8b84b";
 
   const canvas = document.getElementById("game");
   const ctx = canvas.getContext("2d");
@@ -174,6 +208,87 @@
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     playerX = Math.max(70, Math.min(140, width * 0.26));
   }
+
+  // ---- 共有ランキング (Claude Artifact の db capability を使用) ----
+  // GitHub Pages 単体では window.claude が存在しないため、db は常に null になり
+  // ランキングUIは自動的に非表示のまま静かに無効化される（エラーにはならない）。
+  let db = null;
+  let leaderboards = { easy: [], normal: [], hard: [] };
+
+  async function initDb() {
+    try {
+      db = window.claude ? await window.claude.use("db") : null;
+    } catch (e) {
+      db = null;
+    }
+    if (!db) return;
+    DIFFICULTY_ORDER.forEach(function (diff) {
+      db.doc("scores/" + diff).onSnapshot(
+        function (snap) {
+          const data = snap.exists ? snap.data() : null;
+          leaderboards[diff] = (data && Array.isArray(data.entries)) ? data.entries : [];
+        },
+        function () {
+          /* このボードだけ更新が届かなくてもゲームは続行 */
+        }
+      );
+    });
+  }
+  initDb();
+
+  const nameEntryEl = document.getElementById("nameEntry");
+  const nameInput = document.getElementById("nameInput");
+  const entryScoreEl = document.getElementById("entryScore");
+  const submitNameBtn = document.getElementById("submitNameBtn");
+  const skipNameBtn = document.getElementById("skipNameBtn");
+  let nameEntryOpen = false;
+  let pendingScore = 0;
+
+  function openNameEntry(finalScore) {
+    nameEntryOpen = true;
+    pendingScore = finalScore;
+    entryScoreEl.textContent = String(finalScore);
+    nameInput.value = "";
+    nameEntryEl.hidden = false;
+    setTimeout(function () {
+      nameInput.focus();
+    }, 0);
+  }
+
+  function closeNameEntry() {
+    nameEntryEl.hidden = true;
+    nameEntryOpen = false;
+  }
+
+  function submitName() {
+    if (!db) {
+      closeNameEntry();
+      return;
+    }
+    const raw = (nameInput.value || "").trim().slice(0, 10);
+    const name = raw.length ? raw : "名無し";
+    const list = leaderboards[runDifficulty] || [];
+    const newEntries = list
+      .concat([{ name: name, score: pendingScore, ts: Date.now() }])
+      .sort(function (a, b) { return b.score - a.score; })
+      .slice(0, 5);
+    db.doc("scores/" + runDifficulty).set({ entries: newEntries }).catch(function () {
+      /* 反映に失敗しても対戦は続けられる */
+    });
+    closeNameEntry();
+  }
+
+  submitNameBtn.addEventListener("click", submitName);
+  skipNameBtn.addEventListener("click", closeNameEntry);
+  nameInput.addEventListener("keydown", function (e) {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      submitName();
+    } else if (e.key === "Escape") {
+      e.preventDefault();
+      closeNameEntry();
+    }
+  });
 
   // ---- ゲーム状態 ----
   // "title" | "playing" | "gameover"
@@ -203,6 +318,7 @@
   let holding = false;
 
   function resetGame() {
+    runDifficulty = selectedDifficulty;
     playerY = height / 2;
     playerVY = 0;
     tail = [];
@@ -238,30 +354,27 @@
         /* no-op */
       }
     }
+    if (db && score > 0) {
+      const list = leaderboards[runDifficulty] || [];
+      const qualifies = list.length < 5 || score > list[list.length - 1].score;
+      if (qualifies) openNameEntry(score);
+    }
   }
 
-  // タイトル画面に表示する Easy/Normal/Hard 選択ボタンの当たり判定を計算する
   function getDifficultyRects() {
     const btnW = Math.min(96, width * 0.27);
-    const btnH = 36;
+    const btnH = 32;
     const gap = 12;
     const totalW = btnW * 3 + gap * 2;
     const startX = width / 2 - totalW / 2;
-    const y = height / 2 + 6;
+    const y = height / 2 - 64;
     return DIFFICULTY_ORDER.map(function (key, i) {
-      return {
-        key: key,
-        x: startX + i * (btnW + gap),
-        y: y,
-        w: btnW,
-        h: btnH
-      };
+      return { key: key, x: startX + i * (btnW + gap), y: y, w: btnW, h: btnH };
     });
   }
 
-  // タイトル画面の難易度ボタンをタップ/クリックした場合は難易度を切り替えるだけにし、
-  // それ以外の場所を押した場合はゲームを開始する。
   function handlePressAt(x, y) {
+    if (nameEntryOpen) return;
     if (state === "title") {
       const rects = getDifficultyRects();
       for (let i = 0; i < rects.length; i++) {
@@ -280,13 +393,12 @@
   window.addEventListener(
     "keydown",
     function (e) {
+      if (nameEntryOpen) return;
       if (e.code === "Space" || e.key === " ") {
         e.preventDefault();
         if (!holding) {
           holding = true;
-          if (state === "title" || state === "gameover") {
-            resetGame();
-          }
+          if (state === "title" || state === "gameover") resetGame();
         }
       } else if (state === "title" && (e.code === "ArrowLeft" || e.code === "ArrowRight")) {
         e.preventDefault();
@@ -297,14 +409,13 @@
   );
 
   window.addEventListener("keyup", function (e) {
-    if (e.code === "Space" || e.key === " ") {
-      holding = false;
-    }
+    if (e.code === "Space" || e.key === " ") holding = false;
   });
 
   canvas.addEventListener(
     "touchstart",
     function (e) {
+      if (nameEntryOpen) return;
       e.preventDefault();
       if (!holding) {
         holding = true;
@@ -325,25 +436,17 @@
     { passive: false }
   );
 
-  canvas.addEventListener(
-    "touchcancel",
-    function (e) {
-      holding = false;
-    },
-    { passive: false }
-  );
+  canvas.addEventListener("touchcancel", function () { holding = false; }, { passive: false });
 
-  // デスクトップでの動作確認用にマウスにも対応
   canvas.addEventListener("mousedown", function (e) {
+    if (nameEntryOpen) return;
     if (!holding) {
       holding = true;
       const rect = canvas.getBoundingClientRect();
       handlePressAt(e.clientX - rect.left, e.clientY - rect.top);
     }
   });
-  window.addEventListener("mouseup", function () {
-    holding = false;
-  });
+  window.addEventListener("mouseup", function () { holding = false; });
 
   window.addEventListener("resize", resize);
 
@@ -363,14 +466,8 @@
       if (tail.length > TAIL_LENGTH) tail.pop();
     }
 
-    scrollSpeed = Math.min(
-      MAX_SCROLL_SPEED,
-      BASE_SCROLL_SPEED + score * SPEED_INCREASE_PER_SCORE
-    );
-    currentGap = Math.max(
-      GAP_MIN,
-      GAP_BASE - score * GAP_DECREASE_PER_SCORE
-    );
+    scrollSpeed = Math.min(MAX_SCROLL_SPEED, BASE_SCROLL_SPEED + score * SPEED_INCREASE_PER_SCORE);
+    currentGap = Math.max(GAP_MIN, GAP_BASE - score * GAP_DECREASE_PER_SCORE);
 
     spawnDistance += scrollSpeed * dt;
     if (spawnDistance >= OBSTACLE_SPACING) {
@@ -378,40 +475,25 @@
       spawnObstacle();
     }
 
-    for (let i = 0; i < obstacles.length; i++) {
-      obstacles[i].x -= scrollSpeed * dt;
-    }
-    obstacles = obstacles.filter(function (ob) {
-      return ob.x + OBSTACLE_WIDTH > -10;
-    });
+    for (let i = 0; i < obstacles.length; i++) obstacles[i].x -= scrollSpeed * dt;
+    obstacles = obstacles.filter(function (ob) { return ob.x + OBSTACLE_WIDTH > -10; });
 
     for (let i = 0; i < obstacles.length; i++) {
       const ob = obstacles[i];
-
       if (!ob.passed && ob.x + OBSTACLE_WIDTH < playerX) {
         ob.passed = true;
         score++;
       }
-
-      const overlapX =
-        playerX + PLAYER_RADIUS > ob.x &&
-        playerX - PLAYER_RADIUS < ob.x + OBSTACLE_WIDTH;
-
+      const overlapX = playerX + PLAYER_RADIUS > ob.x && playerX - PLAYER_RADIUS < ob.x + OBSTACLE_WIDTH;
       if (overlapX) {
-        if (
-          playerY - PLAYER_RADIUS < ob.gapTop ||
-          playerY + PLAYER_RADIUS > ob.gapTop + ob.gapHeight
-        ) {
+        if (playerY - PLAYER_RADIUS < ob.gapTop || playerY + PLAYER_RADIUS > ob.gapTop + ob.gapHeight) {
           triggerGameOver();
         }
       }
     }
 
     if (playerY - PLAYER_RADIUS < 0 || playerY + PLAYER_RADIUS > height) {
-      playerY = Math.max(
-        PLAYER_RADIUS,
-        Math.min(height - PLAYER_RADIUS, playerY)
-      );
+      playerY = Math.max(PLAYER_RADIUS, Math.min(height - PLAYER_RADIUS, playerY));
       triggerGameOver();
     }
   }
@@ -421,10 +503,8 @@
     ctx.strokeStyle = COLOR_DIM;
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, 1);
-    ctx.lineTo(width, 1);
-    ctx.moveTo(0, height - 1);
-    ctx.lineTo(width, height - 1);
+    ctx.moveTo(0, 1); ctx.lineTo(width, 1);
+    ctx.moveTo(0, height - 1); ctx.lineTo(width, height - 1);
     ctx.stroke();
   }
 
@@ -433,12 +513,7 @@
     for (let i = 0; i < obstacles.length; i++) {
       const ob = obstacles[i];
       ctx.fillRect(ob.x, 0, OBSTACLE_WIDTH, ob.gapTop);
-      ctx.fillRect(
-        ob.x,
-        ob.gapTop + ob.gapHeight,
-        OBSTACLE_WIDTH,
-        height - (ob.gapTop + ob.gapHeight)
-      );
+      ctx.fillRect(ob.x, ob.gapTop + ob.gapHeight, OBSTACLE_WIDTH, height - (ob.gapTop + ob.gapHeight));
     }
   }
 
@@ -476,21 +551,19 @@
     ctx.fillStyle = COLOR_DIM;
     ctx.font = "12px monospace";
     ctx.textAlign = "left";
-    ctx.fillText(DIFFICULTIES[selectedDifficulty].label, 14, 16);
+    ctx.fillText(DIFFICULTIES[runDifficulty].label, 14, 16);
   }
 
   function drawDifficultyButtons() {
     const rects = getDifficultyRects();
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.font = "14px monospace";
-
+    ctx.font = "13px monospace";
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
       const active = r.key === selectedDifficulty;
       const cx = r.x + r.w / 2;
       const cy = r.y + r.h / 2;
-
       if (active) {
         ctx.fillStyle = COLOR_FG;
         ctx.fillRect(r.x, r.y, r.w, r.h);
@@ -505,32 +578,60 @@
     }
   }
 
+  function drawLeaderboard() {
+    if (!db) return;
+    const list = leaderboards[selectedDifficulty] || [];
+    const headerY = height / 2 + 6;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "11px monospace";
+    ctx.fillStyle = COLOR_DIM;
+    ctx.fillText("TOP5 ・ " + DIFFICULTIES[selectedDifficulty].label, width / 2, headerY);
+
+    const blockX0 = width / 2 - 92;
+    const blockX1 = width / 2 + 92;
+    const rowH = 16;
+    for (let i = 0; i < 5; i++) {
+      const y = headerY + 18 + i * rowH;
+      const entry = list[i];
+      ctx.font = "12px monospace";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = i === 0 && entry ? COLOR_ACCENT : COLOR_DIM;
+      ctx.textAlign = "left";
+      const rankLabel = (i + 1) + ". " + (entry ? entry.name : "---");
+      ctx.fillText(rankLabel, blockX0, y);
+      ctx.textAlign = "right";
+      ctx.fillText(entry ? String(entry.score) : "", blockX1, y);
+    }
+  }
+
   function drawTitle() {
     ctx.fillStyle = COLOR_FG;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    ctx.font = "bold 40px monospace";
-    ctx.fillText("糸 通 し", width / 2, height / 2 - 96);
+    ctx.font = 'bold 32px "MS Gothic", monospace';
+    ctx.fillText("糸 通 し", width / 2, height / 2 - 146);
 
-    ctx.font = "16px monospace";
+    ctx.font = "13px monospace";
     ctx.fillStyle = COLOR_DIM;
-    ctx.fillText("長押しで上昇 / 離すと下降", width / 2, height / 2 - 46);
-    ctx.fillText("← → または タップで難易度選択", width / 2, height / 2 - 24);
+    ctx.fillText("長押しで上昇 / 離すと下降", width / 2, height / 2 - 106);
+    ctx.fillText("← → で難易度選択", width / 2, height / 2 - 88);
 
     drawDifficultyButtons();
+    drawLeaderboard();
 
     ctx.fillStyle = COLOR_FG;
-    ctx.font = "18px monospace";
+    ctx.font = "17px monospace";
     const blink = Math.floor(performance.now() / 500) % 2 === 0;
     if (blink) {
-      ctx.fillText("SPACE または タップで START", width / 2, height / 2 + 76);
+      ctx.fillText("SPACE または タップで START", width / 2, height / 2 + 118);
     }
 
     if (best > 0) {
       ctx.fillStyle = COLOR_DIM;
-      ctx.font = "14px monospace";
-      ctx.fillText("BEST " + best, width / 2, height / 2 + 110);
+      ctx.font = "13px monospace";
+      ctx.fillText("自己ベスト " + best, width / 2, height / 2 + 144);
     }
   }
 
@@ -550,13 +651,15 @@
 
     ctx.fillStyle = COLOR_DIM;
     ctx.font = "16px monospace";
-    ctx.fillText("BEST " + best, width / 2, height / 2 + 22);
+    ctx.fillText("自己ベスト " + best, width / 2, height / 2 + 22);
 
-    ctx.fillStyle = COLOR_FG;
-    ctx.font = "16px monospace";
-    const blink = Math.floor(performance.now() / 500) % 2 === 0;
-    if (blink) {
-      ctx.fillText("SPACE または タップで RETRY", width / 2, height / 2 + 62);
+    if (!nameEntryOpen) {
+      ctx.fillStyle = COLOR_FG;
+      ctx.font = "16px monospace";
+      const blink = Math.floor(performance.now() / 500) % 2 === 0;
+      if (blink) {
+        ctx.fillText("SPACE または タップで RETRY", width / 2, height / 2 + 62);
+      }
     }
   }
 
@@ -576,9 +679,7 @@
     drawPlayer();
     drawScore();
 
-    if (state === "gameover") {
-      drawGameOver();
-    }
+    if (state === "gameover") drawGameOver();
   }
 
   // ---- メインループ ----

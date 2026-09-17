@@ -1,4 +1,4 @@
-const CACHE_NAME = "itodoshi-cache-v1";
+const CACHE_NAME = "itodoshi-cache-v2";
 const CORE_ASSETS = [
   "./",
   "./index.html",
@@ -31,18 +31,17 @@ self.addEventListener("activate", (event) => {
 self.addEventListener("fetch", (event) => {
   if (event.request.method !== "GET") return;
 
+  // ネットワーク優先: オンラインなら常に最新を取得してキャッシュを更新し、
+  // オフライン時だけキャッシュへフォールバックする（更新の取りこぼしを防ぐ）。
   event.respondWith(
-    caches.match(event.request).then((cached) => {
-      if (cached) return cached;
-      return fetch(event.request)
-        .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, copy);
-          });
-          return response;
-        })
-        .catch(() => cached);
-    })
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE_NAME).then((cache) => {
+          cache.put(event.request, copy);
+        });
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });

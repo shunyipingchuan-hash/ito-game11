@@ -42,43 +42,99 @@
 
   /* ==========================================================================
    * 物理・難易度 調整用パラメータ
-   * ここの数値だけを触れば挙動を調整できます。
+   * 難易度(Easy/Normal/Hard)ごとにプリセットをまとめてあります。
+   * NORMALの数値は元のバランスから変更していません。
    * ========================================================================== */
+  const DIFFICULTIES = {
+    easy: {
+      label: "EASY",
+      GRAVITY: 900,                 // 下降時の重力加速度 (px/s^2)
+      LIFT: 1100,                   // 長押し中の上昇加速度 (px/s^2)
+      MAX_UP_SPEED: 190,            // 上昇方向の最高速度 (px/s)
+      MAX_DOWN_SPEED: 260,          // 下降方向の最高速度 (px/s)
+      BASE_SCROLL_SPEED: 100,       // 基本スクロール速度 (px/s)
+      SPEED_INCREASE_PER_SCORE: 1.5,// スコア+1ごとのスクロール速度上昇量
+      MAX_SCROLL_SPEED: 220,        // スクロール速度の上限 (px/s)
+      GAP_BASE: 230,                // 針穴の隙間の初期サイズ (px)
+      GAP_MIN: 160,                 // 針穴の隙間の最小サイズ (px)
+      GAP_DECREASE_PER_SCORE: 1.0,  // スコア+1ごとの隙間縮小量 (px)
+      OBSTACLE_SPACING: 320         // 針穴同士の間隔 (px)
+    },
+    normal: {
+      label: "NORMAL",
+      // 下降時にかかる重力加速度 (px/s^2)。大きいほど落下が速くキビキビした感じに、
+      // 小さいほどフワッと漂うような沈み方になる。
+      GRAVITY: 1300,
+      // 長押し中にかかる上昇加速度 (px/s^2)。GRAVITYより少し強めにすると
+      // 「じわっと浮き上がる」感触になる。
+      LIFT: 1500,
+      // 上昇方向の最高速度 (px/s)。これ以上は長押ししても加速しない。
+      MAX_UP_SPEED: 230,
+      // 下降方向の最高速度 (px/s)。落下の終端速度。
+      MAX_DOWN_SPEED: 340,
+      // 針穴（障害物）が流れてくる基本スクロール速度 (px/s)。
+      BASE_SCROLL_SPEED: 150,
+      // 通過数(スコア)が1増えるごとに加算されるスクロール速度 (px/s)。
+      SPEED_INCREASE_PER_SCORE: 3.5,
+      // スクロール速度の上限 (px/s)。無限に速くなりすぎないようにする。
+      MAX_SCROLL_SPEED: 340,
+      // 針穴の隙間の初期サイズ (px)。
+      GAP_BASE: 190,
+      // 針穴の隙間の最小サイズ (px)。これ以上は狭くならない。
+      GAP_MIN: 110,
+      // スコアが1増えるごとに隙間が狭くなる量 (px)。
+      GAP_DECREASE_PER_SCORE: 2.2,
+      // 針穴と針穴の間隔 (px、距離ベース)。
+      OBSTACLE_SPACING: 300
+    },
+    hard: {
+      label: "HARD",
+      GRAVITY: 1500,                 // 下降時の重力加速度 (px/s^2)
+      LIFT: 1650,                    // 長押し中の上昇加速度 (px/s^2)
+      MAX_UP_SPEED: 250,             // 上昇方向の最高速度 (px/s)
+      MAX_DOWN_SPEED: 380,           // 下降方向の最高速度 (px/s)
+      BASE_SCROLL_SPEED: 190,        // 基本スクロール速度 (px/s)
+      SPEED_INCREASE_PER_SCORE: 4.5, // スコア+1ごとのスクロール速度上昇量
+      MAX_SCROLL_SPEED: 400,         // スクロール速度の上限 (px/s)
+      GAP_BASE: 165,                 // 針穴の隙間の初期サイズ (px)
+      GAP_MIN: 95,                   // 針穴の隙間の最小サイズ (px)
+      GAP_DECREASE_PER_SCORE: 2.6,   // スコア+1ごとの隙間縮小量 (px)
+      OBSTACLE_SPACING: 285          // 針穴同士の間隔 (px)
+    }
+  };
+  const DIFFICULTY_ORDER = ["easy", "normal", "hard"];
 
-  // 下降時にかかる重力加速度 (px/s^2)。大きいほど落下が速くキビキビした感じに、
-  // 小さいほどフワッと漂うような沈み方になる。
-  const GRAVITY = 1300;
+  let selectedDifficulty = "normal";
+  let GRAVITY, LIFT, MAX_UP_SPEED, MAX_DOWN_SPEED, BASE_SCROLL_SPEED;
+  let SPEED_INCREASE_PER_SCORE, MAX_SCROLL_SPEED;
+  let GAP_BASE, GAP_MIN, GAP_DECREASE_PER_SCORE, OBSTACLE_SPACING;
 
-  // 長押し中にかかる上昇加速度 (px/s^2)。GRAVITYより少し強めにすると
-  // 「じわっと浮き上がる」感触になる。
-  const LIFT = 1500;
+  function applyDifficulty(key) {
+    const d = DIFFICULTIES[key];
+    selectedDifficulty = key;
+    GRAVITY = d.GRAVITY;
+    LIFT = d.LIFT;
+    MAX_UP_SPEED = d.MAX_UP_SPEED;
+    MAX_DOWN_SPEED = d.MAX_DOWN_SPEED;
+    BASE_SCROLL_SPEED = d.BASE_SCROLL_SPEED;
+    SPEED_INCREASE_PER_SCORE = d.SPEED_INCREASE_PER_SCORE;
+    MAX_SCROLL_SPEED = d.MAX_SCROLL_SPEED;
+    GAP_BASE = d.GAP_BASE;
+    GAP_MIN = d.GAP_MIN;
+    GAP_DECREASE_PER_SCORE = d.GAP_DECREASE_PER_SCORE;
+    OBSTACLE_SPACING = d.OBSTACLE_SPACING;
+  }
 
-  // 上昇方向の最高速度 (px/s)。これ以上は長押ししても加速しない。
-  const MAX_UP_SPEED = 230;
+  function cycleDifficulty(dir) {
+    const idx = DIFFICULTY_ORDER.indexOf(selectedDifficulty);
+    const next =
+      DIFFICULTY_ORDER[
+        (idx + dir + DIFFICULTY_ORDER.length) % DIFFICULTY_ORDER.length
+      ];
+    applyDifficulty(next);
+  }
 
-  // 下降方向の最高速度 (px/s)。落下の終端速度。
-  const MAX_DOWN_SPEED = 340;
-
-  // 針穴（障害物）が流れてくる基本スクロール速度 (px/s)。
-  const BASE_SCROLL_SPEED = 150;
-
-  // 通過数(スコア)が1増えるごとに加算されるスクロール速度 (px/s)。
-  const SPEED_INCREASE_PER_SCORE = 3.5;
-
-  // スクロール速度の上限 (px/s)。無限に速くなりすぎないようにする。
-  const MAX_SCROLL_SPEED = 340;
-
-  // 針穴の隙間の初期サイズ (px)。
-  const GAP_BASE = 190;
-
-  // 針穴の隙間の最小サイズ (px)。これ以上は狭くならない。
-  const GAP_MIN = 110;
-
-  // スコアが1増えるごとに隙間が狭くなる量 (px)。
-  const GAP_DECREASE_PER_SCORE = 2.2;
-
-  // 針穴と針穴の間隔 (px、距離ベース)。
-  const OBSTACLE_SPACING = 300;
+  applyDifficulty(selectedDifficulty);
 
   // 障害物（壁）の横幅 (px)。
   const OBSTACLE_WIDTH = 56;
@@ -184,17 +240,41 @@
     }
   }
 
-  function onPressStart() {
+  // タイトル画面に表示する Easy/Normal/Hard 選択ボタンの当たり判定を計算する
+  function getDifficultyRects() {
+    const btnW = Math.min(96, width * 0.27);
+    const btnH = 36;
+    const gap = 12;
+    const totalW = btnW * 3 + gap * 2;
+    const startX = width / 2 - totalW / 2;
+    const y = height / 2 + 6;
+    return DIFFICULTY_ORDER.map(function (key, i) {
+      return {
+        key: key,
+        x: startX + i * (btnW + gap),
+        y: y,
+        w: btnW,
+        h: btnH
+      };
+    });
+  }
+
+  // タイトル画面の難易度ボタンをタップ/クリックした場合は難易度を切り替えるだけにし、
+  // それ以外の場所を押した場合はゲームを開始する。
+  function handlePressAt(x, y) {
     if (state === "title") {
+      const rects = getDifficultyRects();
+      for (let i = 0; i < rects.length; i++) {
+        const r = rects[i];
+        if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+          applyDifficulty(r.key);
+          return;
+        }
+      }
       resetGame();
     } else if (state === "gameover") {
       resetGame();
     }
-  }
-
-  // ---- 入力 ----
-  function setHolding(v) {
-    holding = v;
   }
 
   window.addEventListener(
@@ -204,8 +284,13 @@
         e.preventDefault();
         if (!holding) {
           holding = true;
-          onPressStart();
+          if (state === "title" || state === "gameover") {
+            resetGame();
+          }
         }
+      } else if (state === "title" && (e.code === "ArrowLeft" || e.code === "ArrowRight")) {
+        e.preventDefault();
+        cycleDifficulty(e.code === "ArrowLeft" ? -1 : 1);
       }
     },
     { passive: false }
@@ -223,7 +308,9 @@
       e.preventDefault();
       if (!holding) {
         holding = true;
-        onPressStart();
+        const t = e.changedTouches[0];
+        const rect = canvas.getBoundingClientRect();
+        handlePressAt(t.clientX - rect.left, t.clientY - rect.top);
       }
     },
     { passive: false }
@@ -247,10 +334,11 @@
   );
 
   // デスクトップでの動作確認用にマウスにも対応
-  canvas.addEventListener("mousedown", function () {
+  canvas.addEventListener("mousedown", function (e) {
     if (!holding) {
       holding = true;
-      onPressStart();
+      const rect = canvas.getBoundingClientRect();
+      handlePressAt(e.clientX - rect.left, e.clientY - rect.top);
     }
   });
   window.addEventListener("mouseup", function () {
@@ -384,6 +472,37 @@
     ctx.textAlign = "center";
     ctx.textBaseline = "top";
     ctx.fillText(String(score), width / 2, 22);
+
+    ctx.fillStyle = COLOR_DIM;
+    ctx.font = "12px monospace";
+    ctx.textAlign = "left";
+    ctx.fillText(DIFFICULTIES[selectedDifficulty].label, 14, 16);
+  }
+
+  function drawDifficultyButtons() {
+    const rects = getDifficultyRects();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.font = "14px monospace";
+
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      const active = r.key === selectedDifficulty;
+      const cx = r.x + r.w / 2;
+      const cy = r.y + r.h / 2;
+
+      if (active) {
+        ctx.fillStyle = COLOR_FG;
+        ctx.fillRect(r.x, r.y, r.w, r.h);
+        ctx.fillStyle = COLOR_BG;
+      } else {
+        ctx.strokeStyle = COLOR_DIM;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(r.x + 0.5, r.y + 0.5, r.w - 1, r.h - 1);
+        ctx.fillStyle = COLOR_DIM;
+      }
+      ctx.fillText(DIFFICULTIES[r.key].label, cx, cy);
+    }
   }
 
   function drawTitle() {
@@ -392,23 +511,26 @@
     ctx.textBaseline = "middle";
 
     ctx.font = "bold 40px monospace";
-    ctx.fillText("糸 通 し", width / 2, height / 2 - 60);
+    ctx.fillText("糸 通 し", width / 2, height / 2 - 96);
 
     ctx.font = "16px monospace";
     ctx.fillStyle = COLOR_DIM;
-    ctx.fillText("長押しで上昇 / 離すと下降", width / 2, height / 2 + 4);
+    ctx.fillText("長押しで上昇 / 離すと下降", width / 2, height / 2 - 46);
+    ctx.fillText("← → または タップで難易度選択", width / 2, height / 2 - 24);
+
+    drawDifficultyButtons();
 
     ctx.fillStyle = COLOR_FG;
     ctx.font = "18px monospace";
     const blink = Math.floor(performance.now() / 500) % 2 === 0;
     if (blink) {
-      ctx.fillText("SPACE または タップで START", width / 2, height / 2 + 46);
+      ctx.fillText("SPACE または タップで START", width / 2, height / 2 + 76);
     }
 
     if (best > 0) {
       ctx.fillStyle = COLOR_DIM;
       ctx.font = "14px monospace";
-      ctx.fillText("BEST " + best, width / 2, height / 2 + 86);
+      ctx.fillText("BEST " + best, width / 2, height / 2 + 110);
     }
   }
 
